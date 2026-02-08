@@ -10,6 +10,8 @@ from config import SimConfig
 from synthetic_data import build_hub_to_city_instance
 from vrptw_solver import solve_vrptw
 from sim_engine import simulate_routes
+from output_manager import OutputManager
+import time
 
 
 def print_routes(routes: dict[int, list[int]], title: str = "Planned Routes"):
@@ -351,6 +353,7 @@ def print_summary(inst, sim_res):
 
 
 def main():
+    start_time = time.time()
     cfg = SimConfig()
 
     # 1) Build synthetic planning instance (hub -> city points)
@@ -368,8 +371,8 @@ def main():
     )
 
     # 2) Solve VRPTW: planned route
-    # baseline (distance + time), risk weight optional
-    res = solve_vrptw(inst, alpha=1.0, beta=1.0, gamma=1.0, verbose=False)
+    # Using realistic Indian costs: α=₹12/km, β=₹5/min, γ=₹30/risk
+    res = solve_vrptw(inst, alpha=12.0, beta=5.0, gamma=30.0, verbose=False)
 
     if res.status not in [2, 9]:  # 2 OPTIMAL, 9 TIME_LIMIT
         print("No feasible VRPTW solution. Status:", res.status)
@@ -406,6 +409,26 @@ def main():
     print("\n" + "="*70)
     print("SIMULATION COMPLETE!")
     print("="*70)
+    
+    # 7) Export all results to organized output database
+    print("\n📊 Exporting simulation results...")
+    output_mgr = OutputManager()
+    vrptw_weights = {"alpha": 12.0, "beta": 5.0, "gamma": 30.0}
+    execution_time = time.time() - start_time
+    
+    output_dir = output_mgr.export_all(
+        inst=inst,
+        vrptw_result=res,
+        sim_result=sim_res,
+        config=cfg,
+        vrptw_weights=vrptw_weights,
+        execution_time_sec=execution_time
+    )
+    
+    print(f"\n✅ Results exported to: {output_dir}")
+    print(f"   📄 Quick view: {output_dir / 'SUMMARY.txt'}")
+    print(f"   📊 Analysis: {output_dir / 'outcomes' / 'deliveries.csv'}")
+
 
 
 if __name__ == "__main__":

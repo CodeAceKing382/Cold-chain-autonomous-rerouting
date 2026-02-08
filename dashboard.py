@@ -9,6 +9,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
+import random
 from dataclasses import asdict
 import time
 
@@ -17,6 +18,7 @@ from synthetic_data import build_hub_to_city_instance
 from vrptw_solver import solve_vrptw
 from sim_engine import simulate_routes
 from monitoring import estimate_quality_remaining
+from real_geography import REAL_GEOGRAPHY
 
 # Page configuration
 st.set_page_config(
@@ -75,137 +77,236 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+
 def create_route_animation(inst, sim_res):
-    """Create map showing vehicle routes"""
+    """Create animated map with city labels, arrows, and moving vehicles"""
     
-    # Use actual coordinates from instance
+    # GPS coordinates and city names
     locations = {}
-    for node_id, (x, y) in inst.coords.items():
-        locations[node_id] = (x, y)
+    for node_id, (lat, lon) in inst.coords.items():
+        locations[node_id] = (lat, lon)
     
-    # Create base map
-    fig = go.Figure()
+    city_names = {}
+    city_names[inst.start] = REAL_GEOGRAPHY["hub"]["name"]
+    city_names[inst.end] = REAL_GEOGRAPHY["hub"]["name"]
+    for customer_data in REAL_GEOGRAPHY["customers"]:
+        city_names[customer_data["id"]] = customer_data["name"]
     
-    # Add customer markers
-    customer_x = [locations[c][0] for c in inst.customers]
-    customer_y = [locations[c][1] for c in inst.customers]
-    customer_names = [f'Customer {c}' for c in inst.customers]
+    # Build animation frames
+    frames = []
     
-    fig.add_trace(go.Scatter(
-        x=customer_x,
-        y=customer_y,
-        mode='markers+text',
-        marker=dict(size=15, color='lightblue', line=dict(width=2, color='darkblue')),
-        text=customer_names,
-        textposition='top center',
-        name='Customers',
-        hoverinfo='text'
-    ))
+    # Safety check: if no routes were generated, return empty figure
+    if not sim_res.final_states or len(sim_res.final_states) == 0:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="⚠️ No feasible solution found. Try adjusting weights or parameters.",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=16, color="red")
+        )
+        return fig
     
-    # Add depot with smaller marker so it doesn't hide route lines
-    depot_x, depot_y = locations[inst.start]
-    fig.add_trace(go.Scatter(
-        x=[depot_x],
-        y=[depot_y],
-        mode='markers+text',
-        marker=dict(size=20, color='red', symbol='star', line=dict(width=2, color='darkred')),
-        text=['DEPOT'],
-        textposition='bottom center',
-        textfont=dict(size=14, color='white', family='Arial Black'),
-        name='Depot',
-        hoverinfo='text',
-        hovertext='Depot (Start/End)'
-    ))
+    max_time = max(state.clock_min for state in sim_res.final_states.values())
+    time_steps = list(range(0, int(max_time) + 1, 5))  # 5-minute intervals
     
-    # Add route lines for each vehicle - COMPLETE JOURNEY FROM DEPOT
-    colors = ['#667eea', '#f2994a', '#56ab2f', '#eb3349', '#4facfe']
+    colors = ['#667eea', '#f2994a', '#56ab2f']
     
-    for k, state in sim_res.final_states.items():
-        route = state.route
+    for t in time_steps:
+        frame_data = []
         
-        # DEBUG: Print route to verify it includes depot
-        print(f"\n=== Vehicle {k} Route ===")
-        print(f"Route nodes: {route}")
-        print(f"First node: {route[0]} (should be depot {inst.start})")
-        print(f"Last node: {route[-1]} (should be depot {inst.end})")
+        # Static customer markers (blue dots)
+        customer_lats = [locations[c][0] for c in inst.customers]
+        customer_lons = [locations[c][1] for c in inst.customers]
         
-        route_x = []
-        route_y = []
-        route_labels = []
-        
-        # Build COMPLETE route: depot → customer1 → customer2 → ... → depot
-        for idx, node in enumerate(route):
-            if node in locations:
-                route_x.append(locations[node][0])
-                route_y.append(locations[node][1])
-                
-                # Label each stop
-                if node == inst.start or node == inst.end:
-                    route_labels.append(f"DEPOT")
-                else:
-                    route_labels.append(f"Customer {node}")
-            else:
-                print(f"WARNING: Node {node} not found in locations!")
-        
-        if len(route_x) < 2:
-            print(f"ERROR: Vehicle {k} has only {len(route_x)} points, cannot draw route!")
-            continue
-        
-        print(f"Drawing {len(route_x)} points for Vehicle {k}")
-        print(f"Segments: {len(route_x) - 1}")
-        
-        # Draw the COMPLETE route line
-        fig.add_trace(go.Scatter(
-            x=route_x,
-            y=route_y,
-            mode='lines+markers',
-            line=dict(width=3, color=colors[k % len(colors)]),
-            marker=dict(
-                size=10, 
-                color=colors[k % len(colors)],
-                line=dict(width=2, color='white'),
-                symbol='circle'
-            ),
-            name=f'Vehicle {k}',
-            hovertemplate='<b>Vehicle {k}</b><br>%{text}<extra></extra>',
-            text=route_labels,
-            legendgroup=f'v{k}'
+        frame_data.append(go.Scattermapbox(
+            lat=customer_lats,
+            lon=customer_lons,
+            mode='markers+text',
+            marker=dict(size=10, color='#4169E1'),
+            text=[city_names.get(c, f'C{c}') for c in inst.customers],
+            textposition='top center',
+            textfont=dict(size=8, color='darkblue', family='Arial Black'),
+            name='Customer Cities',
+            showlegend=False,
+            hovertext=[city_names.get(c, f'Customer {c}') for c in inst.customers],
+            hoverinfo='text'
         ))
         
-        # Add uniform directional arrows for all segments
-        for i in range(len(route_x) - 1):
-            fig.add_annotation(
-                x=route_x[i+1],
-                y=route_y[i+1],
-                ax=route_x[i],
-                ay=route_y[i],
-                xref='x',
-                yref='y',
-                axref='x',
-                ayref='y',
-                showarrow=True,
-                arrowhead=2,
-                arrowsize=1.2,
-                arrowwidth=2,
-                arrowcolor=colors[k % len(colors)],
-                opacity=0.7
-            )
+        # Static depot (red star with label)
+        depot_lat, depot_lon = locations[inst.start]
+        frame_data.append(go.Scattermapbox(
+            lat=[depot_lat],
+            lon=[depot_lon],
+            mode='markers+text',
+            marker=dict(size=16, color='red', symbol='star'),
+            text=city_names.get(inst.start, 'Midnapore'),
+            textposition='bottom center',
+            textfont=dict(size=10, color='darkred', family='Arial Black'),
+            name=f'{city_names.get(inst.start, "Midnapore")} (Hub)',
+            showlegend=False,
+            hovertext=city_names.get(inst.start, 'HUB'),
+            hoverinfo='text'
+        ))
+        
+        # Vehicle routes and positions
+        for k, state in sim_res.final_states.items():
+            route = state.route
+            route_lats = []
+            route_lons = []
+            
+            for node in route:
+                if node in locations:
+                    route_lats.append(locations[node][0])
+                    route_lons.append(locations[node][1])
+            
+            if len(route_lats) >= 2:
+                # Draw route line
+                frame_data.append(go.Scattermapbox(
+                    lat=route_lats,
+                    lon=route_lons,
+                    mode='lines',
+                    line=dict(width=3, color=colors[k % len(colors)]),
+                    name=f'Vehicle {k} Route',
+                    showlegend=(t == 0),  # Show legend only on first frame
+                    hovertemplate=f'<b>Vehicle {k}</b><extra></extra>'
+                ))
+                
+                # Calculate vehicle position at time t
+                progress = min(t / max_time, 1.0) if max_time > 0 else 0
+                segment_count = len(route_lats) - 1
+                current_segment = int(progress * segment_count)
+                
+                if current_segment < segment_count:
+                    # Interpolate within current segment
+                    segment_progress = (progress * segment_count) - current_segment
+                    
+                    lat1 = route_lats[current_segment]
+                    lon1 = route_lons[current_segment]
+                    lat2 = route_lats[current_segment + 1]
+                    lon2 = route_lons[current_segment + 1]
+                    
+                    vehicle_lat = lat1 + (lat2 - lat1) * segment_progress
+                    vehicle_lon = lon1 + (lon2 - lon1) * segment_progress
+                else:
+                    # At end of route
+                    vehicle_lat = route_lats[-1]
+                    vehicle_lon = route_lons[-1]
+                
+                # Add moving vehicle marker with label
+                frame_data.append(go.Scattermapbox(
+                    lat=[vehicle_lat],
+                    lon=[vehicle_lon],
+                    mode='markers+text',
+                    marker=dict(
+                        size=14,
+                        color=colors[k % len(colors)],
+                        symbol='circle',
+                        opacity=0.9
+                    ),
+                    text=f'V{k}',
+                    textposition='middle center',
+                    textfont=dict(size=8, color='white', family='Arial Black'),
+                    name=f'Vehicle {k}',
+                    showlegend=False,
+                    hovertemplate=f'<b>Vehicle {k}</b><br>Time: {t} min<extra></extra>'
+                ))
+        
+        frames.append(go.Frame(data=frame_data, name=str(t)))
     
-    # Update layout
+    # Create figure with first frame
+    fig = go.Figure(data=frames[0].data, frames=frames)
+    
+    # Configure mapbox
+    center_lat = REAL_GEOGRAPHY["hub"]["latitude"]
+    center_lon = REAL_GEOGRAPHY["hub"]["longitude"]
+    
     fig.update_layout(
-        title='Vehicle Route Visualization',
-        xaxis=dict(title='X Coordinate (km)', showgrid=True, zeroline=True),
-        yaxis=dict(title='Y Coordinate (km)', showgrid=True, zeroline=True),
-        hovermode='closest',
-        height=600,
+        mapbox=dict(
+            style="stamen-terrain",  # More reliable than open-street-map
+            center=dict(lat=center_lat, lon=center_lon),
+            zoom=8.3,
+        ),
         showlegend=True,
         legend=dict(
             yanchor="top",
             y=0.99,
             xanchor="left",
-            x=0.01
-        )
+            x=0.01,
+            bgcolor="rgba(255,255,255,0.9)",
+            font=dict(size=11)
+        ),
+        height=650,
+        title=dict(
+            text="🚚 Cold Chain Routes - Medinipur District",
+            x=0.5,
+            xanchor='center',
+            font=dict(size=20, color='#667eea')
+        ),
+        margin=dict(l=0, r=0, t=50, b=0),
+        # Animation controls
+        updatemenus=[{
+            "buttons": [
+                {
+                    "label": "▶️ Play",
+                    "method": "animate",
+                    "args": [None, {
+                        "frame": {"duration": 500, "redraw": True},
+                        "fromcurrent": True,
+                        "mode": "immediate",
+                        "transition": {"duration": 300}
+                    }]
+                },
+                {
+                    "label": "⏸️ Pause",
+                    "method": "animate",
+                    "args": [[None], {
+                        "frame": {"duration": 0, "redraw": False},
+                        "mode": "immediate"
+                    }]
+                }
+            ],
+            "direction": "left",
+            "pad": {"r": 10, "t": 70},
+            "showactive": True,
+            "type": "buttons",
+            "x": 0.1,
+            "xanchor": "left",
+            "y": 0,
+            "yanchor": "bottom",
+            "bgcolor": "#667eea",
+            "font": {"color": "white", "size": 13}
+        }],
+        sliders=[{
+            "active": 0,
+            "steps": [
+                {
+                    "args": [[f.name], {
+                        "frame": {"duration": 0, "redraw": True},
+                        "mode": "immediate"
+                    }],
+                    "label": f"{f.name}m",
+                    "method": "animate"
+                }
+                for f in frames
+            ],
+            "x": 0.1,
+            "len": 0.85,
+            "xanchor": "left",
+            "y": 0,
+            "yanchor": "top",
+            "pad": {"b": 10, "t": 50},
+            "currentvalue": {
+                "prefix": "Time: ",
+                "suffix": " min",
+                "visible": True,
+                "xanchor": "right"
+            }
+        }]
     )
+    
+    # Hide the coordinate axes (remove overlay)
+    fig.update_xaxes(visible=False)
+    fig.update_yaxes(visible=False)
     
     return fig
 
@@ -357,19 +458,77 @@ def main():
     
     # Sidebar configuration
     with st.sidebar:
-        st.image("https://via.placeholder.com/300x100/667eea/ffffff?text=Cold+Chain+AI", use_column_width=True)
+        st.image("https://via.placeholder.com/300x100/667eea/ffffff?text=Cold+Chain+AI", use_container_width=True)
         st.markdown("### ⚙️ Simulation Configuration")
         
-        n_customers = st.slider("Number of Customers", 5, 20, 12)
+        # Fixed number of customers (12 real cities in Medinipur)
+        n_customers = 12
+        st.info(f"📍 **{n_customers} Customer Cities** (Medinipur District)")
+        
         n_vehicles = st.slider("Number of Vehicles", 2, 5, 3)
         vehicle_capacity = st.slider("Vehicle Capacity (units)", 10, 30, 20)
+        
+        st.markdown("### 📦 Customer Demands")
+        st.caption("Set demand for each city (crates/units)")
+        
+        # Individual demand sliders for each customer
+        customer_demands = {}
+        from real_geography import REAL_GEOGRAPHY
+        
+        # Create 2 columns for better layout
+        col1, col2 = st.columns(2)
+        
+        for idx, customer in enumerate(REAL_GEOGRAPHY["customers"]):
+            city_name = customer["name"]
+            customer_id = customer["id"]
+            
+            # Alternate between columns
+            with col1 if idx % 2 == 0 else col2:
+                customer_demands[customer_id] = st.number_input(
+                    f"{city_name}",
+                    min_value=1,
+                    max_value=10,
+                    value=random.randint(1, 4),
+                    step=1,
+                    key=f"demand_{customer_id}"
+                )
         
         st.markdown("### 🎯 Quality Thresholds")
         min_quality = st.slider("Minimum Quality (%)", 40, 90, 60) / 100
         
-        st.markdown("### 💰 Cost Parameters")
-        revenue_per_customer = st.number_input("Revenue per Customer (₹)", 500, 2000, 1000)
-        spoilage_cost = st.number_input("Spoilage Cost per Unit (₹)", 1000, 5000, 2700)
+        st.markdown("### ⚖️ VRPTW Optimization Weights")
+        st.caption("Economic costs: Distance (₹/km), Time (₹/min), Risk (₹/unit)")
+        alpha_weight = st.slider("Distance Cost α (₹/km)", 5.0, 20.0, 12.0, 0.5)
+        beta_weight = st.slider("Time Cost β (₹/min)", 2.0, 10.0, 5.0, 0.5)
+        gamma_weight = st.slider("Risk Cost γ (₹/unit)", 10.0, 50.0, 30.0, 1.0)
+        
+        st.markdown("### 💰 Economic Parameters")
+        
+        # Revenue
+        st.markdown("**💵 Revenue**")
+        revenue_per_customer = st.number_input("Revenue per Customer (₹)", 500, 2000, 1000, key="revenue")
+        
+        # Operating Costs
+        st.markdown("**� Operating Costs**")
+        col1, col2 = st.columns(2)
+        with col1:
+            fuel_cost_per_km = st.number_input("Fuel (₹/km)", 5, 20, 12, key="fuel")
+        with col2:
+            driver_wage_per_hour = st.number_input("Driver (₹/hr)", 50, 200, 100, key="driver")
+        
+        col3, col4 = st.columns(2)
+        with col3:
+            vehicle_rental_per_day = st.number_input("Vehicle Rental (₹/day)", 1000, 5000, 2000, key="rental")
+        with col4:
+            refrigeration_cost_per_hour = st.number_input("Refrigeration (₹/hr)", 20, 100, 50, key="refrig")
+        
+        # Quality & Penalty Costs
+        st.markdown("**⚠️ Quality & Penalties**")
+        col5, col6 = st.columns(2)
+        with col5:
+            spoilage_cost = st.number_input("Spoilage (₹/unit)", 1000, 5000, 2700, key="spoilage")
+        with col6:
+            temp_violation_penalty = st.number_input("Temp Violation (₹)", 100, 1000, 500, key="temp_penalty")
         
         st.markdown("---")
         run_button = st.button("🚀 Run Simulation", use_container_width=True)
@@ -394,10 +553,11 @@ def main():
                 n_vehicles=n_vehicles,
                 vehicle_capacity=vehicle_capacity,
                 horizon_min=cfg.horizon_min,
-                cfg=cfg
+                cfg=cfg,
+                custom_demands=customer_demands  # Pass custom demands
             )
             
-            res = solve_vrptw(inst, verbose=False)
+            res = solve_vrptw(inst, alpha=alpha_weight, beta=beta_weight, gamma=gamma_weight, verbose=False)
             sim_res = simulate_routes(inst, res.routes, cfg)
             
             # Store in session state

@@ -6,10 +6,36 @@ from typing import Dict, List, Tuple
 
 from data_models import Node, Vehicle, ProduceBatch, Shipment, PlanningInstance
 from config import SimConfig
+from real_geography import REAL_GEOGRAPHY
 
 
-def euclid(a: Tuple[float, float], b: Tuple[float, float]) -> float:
-    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+def haversine_km(coord1: Tuple[float, float], coord2: Tuple[float, float]) -> float:
+    """
+    Calculate the great-circle distance between two GPS coordinates in kilometers.
+    Uses the Haversine formula for accurate distance on a sphere.
+    
+    Args:
+        coord1: (latitude, longitude) in degrees
+        coord2: (latitude, longitude) in degrees
+    
+    Returns:
+        Distance in kilometers
+    """
+    lat1, lon1 = math.radians(coord1[0]), math.radians(coord1[1])
+    lat2, lon2 = math.radians(coord2[0]), math.radians(coord2[1])
+    
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    
+    # Haversine formula
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    
+    # Earth's radius in kilometers
+    earth_radius_km = 6371.0
+    
+    return earth_radius_km * c
 
 
 def build_hub_to_city_instance(
@@ -19,6 +45,7 @@ def build_hub_to_city_instance(
     vehicle_capacity: int = 20,
     horizon_min: int = 300,
     cfg: SimConfig = None,
+    custom_demands: Dict[int, int] = None,  # Optional: custom demand per customer
 ) -> PlanningInstance:
     """
     Generates a usable synthetic VRPTW instance:
@@ -47,69 +74,76 @@ def build_hub_to_city_instance(
     Q = vehicle_capacity
     horizon = float(horizon_min)
 
-    # --- Place hub in center; customers scattered ---
+    # --- Use real geography from Medinipur District ---
     node_meta: Dict[int, Node] = {}
     coords: Dict[int, Tuple[float, float]] = {}
 
-    hub_x, hub_y = 50.0, 50.0
-    coords[start] = (hub_x, hub_y)
-    coords[end] = (hub_x, hub_y)
+    # Hub coordinates (Midnapore)
+    hub_lat = REAL_GEOGRAPHY["hub"]["latitude"]
+    hub_lon = REAL_GEOGRAPHY["hub"]["longitude"]
+    coords[start] = (hub_lat, hub_lon)
+    coords[end] = (hub_lat, hub_lon)
 
     node_meta[start] = Node(
-        node_id=start, node_type="hub", name="Rural Hub",
-        x=hub_x, y=hub_y, tw_open=0.0, tw_close=horizon, service_min=0.0
+        node_id=start, node_type="hub", name=REAL_GEOGRAPHY["hub"]["name"],
+        x=hub_lat, y=hub_lon, tw_open=0.0, tw_close=horizon, service_min=0.0
     )
     node_meta[end] = Node(
-        node_id=end, node_type="hub", name="Rural Hub (return)",
-        x=hub_x, y=hub_y, tw_open=0.0, tw_close=horizon, service_min=0.0
+        node_id=end, node_type="hub", name=f"{REAL_GEOGRAPHY['hub']['name']} (return)",
+        x=hub_lat, y=hub_lon, tw_open=0.0, tw_close=horizon, service_min=0.0
     )
 
-    # customer nodes
-    for i in customers:
-        x = random.uniform(0, 100)
-        y = random.uniform(0, 100)
+    # Customer nodes - use real GPS coordinates
+    for idx, customer_data in enumerate(REAL_GEOGRAPHY["customers"][:n_city_points], start=1):
+        lat = customer_data["latitude"]
+        lon = customer_data["longitude"]
+        coords[idx] = (lat, lon)
+        
+        # Generate time windows (TODO: replace with real receiving windows)
+        service_time = random.uniform(5, 10)
+        tw_start = random.uniform(0, horizon / 2)
+        tw_width = random.uniform((horizon - tw_start) * 0.4, (horizon - tw_start) * 0.8)
+        tw_end = min(tw_start + tw_width, horizon)
 
-        # TODO: replace with observed receiving windows (mandi/DC)
-        # Here we create "plausible" windows: open near earliest arrival, close later.
-        # We'll set service time 5-10 min.
-        service_min = float(random.choice([5, 5, 5, 8, 10]))
-
-        coords[i] = (x, y)
-
-        node_meta[i] = Node(
-            node_id=i,
-            node_type="city_point",
-            name=f"City Drop {i}",
-            x=x, y=y,
-            tw_open=0.0,    # temp placeholder, overwritten below
-            tw_close=horizon,
-            service_min=service_min
+        node_meta[idx] = Node(
+            node_id=idx, node_type="city_point", name=customer_data["name"],
+            x=lat, y=lon,
+            tw_open=tw_start, tw_close=tw_end, service_min=service_time
         )
 
     # --- Distance / travel time matrices ---
     dist: Dict[Tuple[int, int], float] = {}
     tt: Dict[Tuple[int, int], float] = {}
 
-    # TODO: replace speed model with road-network travel times (OSRM/Google)
-    # For now: travel_time = distance / speed_factor. Keep speed_factor ~1.
-    base_speed = 1.33  # km/min (80 km/h - highway speed)
+    # TODO: replace with road-network travel times (OSRM/Google)
+    # For now: travel_time = haversine_distance / avg_truck_speed
+    # Realistic truck speed in rural India: 40 km/h = 0.667 km/min
+    avg_speed_kmph = 70.0
+    avg_speed_km_per_min = avg_speed_kmph / 60.0
 
     for i in nodes:
         for j in nodes:
             if i == j:
                 continue
-            d = euclid(coords[i], coords[j])
+            d = haversine_km(coords[i], coords[j])  # Now in km!
             dist[(i, j)] = d
-            tt[(i, j)] = d / base_speed
+            tt[(i, j)] = d / avg_speed_km_per_min  # Travel time in minutes
 
     # --- Service time dict ---
     service: Dict[int, float] = {i: node_meta[i].service_min for i in nodes}
 
     # --- Demands ---
     demand: Dict[int, int] = {i: 0 for i in nodes}
-    for i in customers:
-        # TODO: replace with real order size distributions (crates/kg)
-        demand[i] = random.randint(1, 4)
+    
+    if custom_demands is not None:
+        # Use custom demands from dashboard
+        for i in customers:
+            demand[i] = custom_demands.get(i, random.randint(1, 4))
+    else:
+        # Generate random demands
+        for i in customers:
+            # TODO: replace with real order size distributions (crates/kg)
+            demand[i] = random.randint(1, 4)
 
     # --- Time windows ---
     tw: Dict[int, Tuple[float, float]] = {start: (0.0, horizon), end: (0.0, horizon)}
