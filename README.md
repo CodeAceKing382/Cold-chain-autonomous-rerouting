@@ -86,22 +86,59 @@ streamlit run dashboard.py
 
 ## 📊 Dashboard Features
 
-The interactive Streamlit dashboard provides:
+The interactive Streamlit dashboard provides comprehensive monitoring and analysis:
 
-1. **Route Visualization** - Color-coded vehicle routes with depot and customer locations
-2. **Quality Monitoring** - Real-time quality degradation graphs per vehicle
-3. **Temperature Tracking** - Multi-compartment temperature profiles
-4. **Reroute Decisions** - Timeline of autonomous rerouting events
-5. **Performance Metrics** - Fulfillment rate, average quality, distance traveled
+### Real-Time Monitoring
+1. **🗺️ Route Visualization** - Geographic map showing vehicle routes on India map (Medinipur district)
+   - Color-coded routes per vehicle
+   - Customer locations with city names
+   - Hub/depot marked with star icon
+   - Plotly Scattergeo for reliable rendering
 
-### Configuration Parameters
+2. **📈 Quality Degradation Tracking** - Per-vehicle and per-batch quality over time
+   - Exponential decay visualization
+   - Quality threshold indicators
+   - Product-specific degradation curves
 
-Adjust simulation parameters in the sidebar:
-- Number of customers (5-20)
-- Fleet size (2-5 vehicles)
-- Vehicle capacity (10-30 units)
-- Quality threshold (40-90%)
-- Economic parameters (revenue, spoilage costs)
+3. **🌡️ Temperature Monitoring** - Multi-compartment temperature profiles
+   - Independent compartments (A: Dairy 3°C, B: Produce 12°C, C: Flowers 15°C)
+   - Safe range visualization
+   - Temperature excursion alerts
+
+### Decision Intelligence
+
+4. **🔄 Autonomous Reroute Timeline** - Complete decision history
+   - Trigger events (temperature excursion, cumulative abuse, quality drop)
+   - Options evaluated with scores
+   - Final decision with economic impact
+
+5. **📊 Performance Metrics Dashboard**
+   - Fulfillment rate (customers served/total)
+   - Average delivered quality
+   - Total distance traveled
+   - Economic summary (revenue, costs, profit)
+
+### Analytics & Insights
+
+6. **📉 Customer Fulfillment Status**
+   - Delivered vs. abandoned customers
+   - Quality at delivery with color coding (🟢 Good, 🟡 Acceptable, 🔴 Poor)
+   - Reason for abandonment (quality preservation)
+
+7. **🚚 Vehicle Summary Cards**
+   - Final temperatures per compartment
+   - Reroute triggers activated
+   - Batches tracked
+   - Total above-safe time
+   - Cumulative abuse score
+
+8. **⚙️ Interactive Configuration**
+   - Adjustable simulation parameters in sidebar
+   - Number of customers (5-20)
+   - Fleet size (2-5 vehicles)
+   - Vehicle capacity (10-30 units)
+   - Quality threshold (40-90%)
+   - Economic parameters (₹ revenue, spoilage costs)
 
 ---
 
@@ -227,22 +264,83 @@ Load custom scenarios from JSON:
 
 ---
 
-## 💡 Future Enhancements
+## 👥 Team Contributions
 
-- [ ] Machine learning for quality prediction
-- [ ] Real-time GPS integration
-- [ ] Multi-depot scenarios
-- [ ] Customer priority weighting
-- [ ] Carbon emissions tracking
-- [ ] Historical data analysis
+### 👨‍💻 Raghuveer V - Backend Development Lead
+
+**Core System Architecture**
+- VRPTW solver implementation (Gurobi)
+- Simulation engine development
+- Autonomous rerouting algorithms
+
+**Data Infrastructure**
+- Synthetic data generator
+- Real geography integration (Medinipur)
+- Output management system
+
+**Version Control & Integration**
+- GitHub repository setup
+- Code documentation
+- CI/CD pipeline configuration
+
+**Performance Optimization**
+- Algorithm efficiency tuning
+- Multi-compartment temperature dynamics
+- Quality tracking models
 
 ---
 
-## 👥 Contributors
+### 👨‍💻 Arnab Chakraborty - Frontend & Research Lead
 
-**Authors:**
-- **Raghuveer V** - [GitHub](https://github.com/YOUR_USERNAME)
-- **Arnab Chakraborty** - [GitHub](https://github.com/CO_AUTHOR_USERNAME)
+**User Interface Development**
+- Streamlit dashboard design
+- Interactive route visualization
+- Real-time metrics display
+
+**Visualization & Analytics**
+- Animated map integration (Plotly)
+- Quality degradation graphs
+- Temperature monitoring charts
+
+**Data Research & Validation**
+- Real-world GPS coordinates collection
+- Indian cold chain logistics research
+- Economic parameter benchmarking
+
+**User Experience Design**
+- Dashboard parameter controls
+- Cost configuration interface
+- Customer demand inputs
+
+---
+
+## 🚀 Future Work & Roadmap
+
+### 🌡️ Real-Time Temperature Data Integration
+**Priority: HIGH**
+- IoT sensor integration (Arduino/ESP32)
+- Live telemetry streaming via MQTT
+- Real-time anomaly detection
+- Cloud database synchronization
+
+### 🔧 Model Robustness Enhancement
+**Priority: HIGH**
+- Edge case handling
+- Validation with real logistics data
+
+### 📄 Project Report & Documentation
+**Priority: MEDIUM**
+- Technical report writing
+- Algorithm documentation
+- User manual creation
+- Academic paper preparation
+
+### 🌐 Real-Time GUI Hosting
+**Priority: MEDIUM**
+- Cloud deployment (AWS/Azure/Heroku)
+- Persistent database setup
+- Multi-user authentication
+- Public web access configuration
 
 ---
 
