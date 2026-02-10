@@ -118,14 +118,14 @@ def create_route_animation(inst, sim_res):
         customer_lats = [locations[c][0] for c in inst.customers]
         customer_lons = [locations[c][1] for c in inst.customers]
         
-        frame_data.append(go.Scattermapbox(
+        frame_data.append(go.Scattergeo(
             lat=customer_lats,
             lon=customer_lons,
             mode='markers+text',
-            marker=dict(size=10, color='#4169E1'),
+            marker=dict(size=10, color='#4169E1', line=dict(width=1, color='white')),
             text=[city_names.get(c, f'C{c}') for c in inst.customers],
             textposition='top center',
-            textfont=dict(size=8, color='darkblue', family='Arial Black'),
+            textfont=dict(size=9, color='darkblue', family='Arial Black'),
             name='Customer Cities',
             showlegend=False,
             hovertext=[city_names.get(c, f'Customer {c}') for c in inst.customers],
@@ -134,14 +134,14 @@ def create_route_animation(inst, sim_res):
         
         # Static depot (red star with label)
         depot_lat, depot_lon = locations[inst.start]
-        frame_data.append(go.Scattermapbox(
+        frame_data.append(go.Scattergeo(
             lat=[depot_lat],
             lon=[depot_lon],
             mode='markers+text',
-            marker=dict(size=16, color='red', symbol='star'),
+            marker=dict(size=18, color='red', symbol='star', line=dict(width=2, color='darkred')),
             text=city_names.get(inst.start, 'Midnapore'),
             textposition='bottom center',
-            textfont=dict(size=10, color='darkred', family='Arial Black'),
+            textfont=dict(size=11, color='darkred', family='Arial Black'),
             name=f'{city_names.get(inst.start, "Midnapore")} (Hub)',
             showlegend=False,
             hovertext=city_names.get(inst.start, 'HUB'),
@@ -161,7 +161,7 @@ def create_route_animation(inst, sim_res):
             
             if len(route_lats) >= 2:
                 # Draw route line
-                frame_data.append(go.Scattermapbox(
+                frame_data.append(go.Scattergeo(
                     lat=route_lats,
                     lon=route_lons,
                     mode='lines',
@@ -193,7 +193,7 @@ def create_route_animation(inst, sim_res):
                     vehicle_lon = route_lons[-1]
                 
                 # Add moving vehicle marker with label
-                frame_data.append(go.Scattermapbox(
+                frame_data.append(go.Scattergeo(
                     lat=[vehicle_lat],
                     lon=[vehicle_lon],
                     mode='markers+text',
@@ -221,10 +221,18 @@ def create_route_animation(inst, sim_res):
     center_lon = REAL_GEOGRAPHY["hub"]["longitude"]
     
     fig.update_layout(
-        mapbox=dict(
-            style="stamen-terrain",  # More reliable than open-street-map
+        geo=dict(
+            scope='asia',
+            projection_type='mercator',
+            showland=True,
+            landcolor='rgb(230, 230, 230)',
+            showcountries=True,
+            countrycolor='rgb(150, 150, 150)',
+            showlakes=True,
+            lakecolor='rgb(180, 220, 255)',
             center=dict(lat=center_lat, lon=center_lon),
-            zoom=8.3,
+            lonaxis=dict(range=[center_lon - 1.5, center_lon + 1.5]),
+            lataxis=dict(range=[center_lat - 1, center_lat + 1]),
         ),
         showlegend=True,
         legend=dict(
@@ -243,6 +251,7 @@ def create_route_animation(inst, sim_res):
             font=dict(size=20, color='#667eea')
         ),
         margin=dict(l=0, r=0, t=50, b=0),
+        template="plotly_white",  # Ensure white background
         # Animation controls
         updatemenus=[{
             "buttons": [

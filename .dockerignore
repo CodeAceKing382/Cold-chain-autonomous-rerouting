@@ -1,0 +1,47 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Outputs (these are generated at runtime)
+outputs/
+*.png
+*.jpg
+*.csv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Documentation
+*.md
+!README.md
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose.yml
+
+# Gurobi license (handle separately)
+gurobi.lic
