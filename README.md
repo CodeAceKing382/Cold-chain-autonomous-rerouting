@@ -245,25 +245,6 @@ Typical simulation results:
 
 ---
 
-## 🛠️ Configuration
-
-### Scenario Files (Coming Soon)
-
-Load custom scenarios from JSON:
-
-```json
-{
-  "n_customers": 15,
-  "n_vehicles": 3,
-  "vehicle_capacity": 20,
-  "trigger_min_quality": 0.65,
-  "horizon_min": 240,
-  "seed": 42
-}
-```
-
----
-
 ## 👥 Team Contributions
 
 ### 👨‍💻 Raghuveer V - Backend Development Lead
@@ -348,38 +329,4 @@ Load custom scenarios from JSON:
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
----
 
-## 🙏 Acknowledgments
-
-- Gurobi Optimization for VRPTW solver
-- Streamlit for interactive dashboard framework
-- Plotly for visualization
-- MaaSSim project inspiration
-
----
-
-## 📧 Contact
-
-For questions or collaboration opportunities:
-- 📧 Email: [your.email@example.com]
-- 🐛 Issues: [GitHub Issues](https://github.com/YOUR_USERNAME/cold-chain-autonomous-rerouting/issues)
-
----
-
-## 📊 Citation
-
-If you use this project in your research, please cite:
-
-```bibtex
-@software{cold_chain_routing_2026,
-  author = {Raghuveer V and Arnab Chakraborty},
-  title = {Cold Chain Autonomous Rerouting: Quality-Driven Vehicle Routing for Perishable Logistics},
-  year = {2026},
-  url = {https://github.com/YOUR_USERNAME/cold-chain-autonomous-rerouting}
-}
-```
-
----
-
-**⭐ Star this repo if you find it useful!**
