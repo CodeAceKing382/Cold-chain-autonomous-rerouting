@@ -1,0 +1,6 @@
+# System packages required for Streamlit Cloud
+# Only add packages if deployment fails due to missing dependencies
+
+# Examples (currently none needed):
+# libgurobi100
+# curl
