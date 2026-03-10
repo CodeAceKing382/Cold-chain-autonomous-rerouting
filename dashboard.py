@@ -12,8 +12,35 @@ import numpy as np
 import random
 from dataclasses import asdict
 import time
+import requests
+import folium
+from streamlit_folium import st_folium
 
 from config import SimConfig
+
+@st.cache_data(show_spinner=False)
+def get_osrm_route(route_coords):
+    """Fetch real road polyline from OSRM between a list of (lat, lon) waypoints."""
+    full_poly = []
+    for i in range(len(route_coords) - 1):
+        lat1, lon1 = route_coords[i]
+        lat2, lon2 = route_coords[i+1]
+        url = f"http://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson"
+        try:
+            response = requests.get(url, timeout=5)
+            data = response.json()
+            if data.get("code") == "Ok":
+                coords = data["routes"][0]["geometry"]["coordinates"]
+                segment_poly = [(lat, lon) for lon, lat in coords]
+                if i > 0 and len(segment_poly) > 0:
+                    segment_poly = segment_poly[1:]
+                full_poly.extend(segment_poly)
+            else:
+                full_poly.extend([(lat1, lon1), (lat2, lon2)])
+        except Exception:
+            full_poly.extend([(lat1, lon1), (lat2, lon2)])
+    return full_poly
+
 from synthetic_data import build_hub_to_city_instance
 from vrptw_solver import solve_vrptw
 from sim_engine import simulate_routes
@@ -78,249 +105,97 @@ st.markdown("""
 
 
 
-def create_route_animation(inst, sim_res):
-    """Create animated map with city labels, arrows, and moving vehicles"""
+def create_live_folium_map(inst, sim_res, current_sim_time):
+    """Create a live Folium map with moving vehicles"""
     
-    # GPS coordinates and city names
     locations = {}
     for node_id, (lat, lon) in inst.coords.items():
         locations[node_id] = (lat, lon)
     
     city_names = {}
     city_names[inst.start] = REAL_GEOGRAPHY["hub"]["name"]
-    city_names[inst.end] = REAL_GEOGRAPHY["hub"]["name"]
     for customer_data in REAL_GEOGRAPHY["customers"]:
         city_names[customer_data["id"]] = customer_data["name"]
-    
-    # Build animation frames
-    frames = []
-    
-    # Safety check: if no routes were generated, return empty figure
-    if not sim_res.final_states or len(sim_res.final_states) == 0:
-        fig = go.Figure()
-        fig.add_annotation(
-            text="⚠️ No feasible solution found. Try adjusting weights or parameters.",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, showarrow=False,
-            font=dict(size=16, color="red")
-        )
-        return fig
-    
-    max_time = max(state.clock_min for state in sim_res.final_states.values())
-    time_steps = list(range(0, int(max_time) + 1, 5))  # 5-minute intervals
-    
-    colors = ['#667eea', '#f2994a', '#56ab2f']
-    
-    for t in time_steps:
-        frame_data = []
         
-        # Static customer markers (blue dots)
-        customer_lats = [locations[c][0] for c in inst.customers]
-        customer_lons = [locations[c][1] for c in inst.customers]
-        
-        frame_data.append(go.Scattergeo(
-            lat=customer_lats,
-            lon=customer_lons,
-            mode='markers+text',
-            marker=dict(size=10, color='#4169E1', line=dict(width=1, color='white')),
-            text=[city_names.get(c, f'C{c}') for c in inst.customers],
-            textposition='top center',
-            textfont=dict(size=9, color='darkblue', family='Arial Black'),
-            name='Customer Cities',
-            showlegend=False,
-            hovertext=[city_names.get(c, f'Customer {c}') for c in inst.customers],
-            hoverinfo='text'
-        ))
-        
-        # Static depot (red star with label)
-        depot_lat, depot_lon = locations[inst.start]
-        frame_data.append(go.Scattergeo(
-            lat=[depot_lat],
-            lon=[depot_lon],
-            mode='markers+text',
-            marker=dict(size=18, color='red', symbol='star', line=dict(width=2, color='darkred')),
-            text=city_names.get(inst.start, 'Midnapore'),
-            textposition='bottom center',
-            textfont=dict(size=11, color='darkred', family='Arial Black'),
-            name=f'{city_names.get(inst.start, "Midnapore")} (Hub)',
-            showlegend=False,
-            hovertext=city_names.get(inst.start, 'HUB'),
-            hoverinfo='text'
-        ))
-        
-        # Vehicle routes and positions
-        for k, state in sim_res.final_states.items():
-            route = state.route
-            route_lats = []
-            route_lons = []
-            
-            for node in route:
-                if node in locations:
-                    route_lats.append(locations[node][0])
-                    route_lons.append(locations[node][1])
-            
-            if len(route_lats) >= 2:
-                # Draw route line
-                frame_data.append(go.Scattergeo(
-                    lat=route_lats,
-                    lon=route_lons,
-                    mode='lines',
-                    line=dict(width=3, color=colors[k % len(colors)]),
-                    name=f'Vehicle {k} Route',
-                    showlegend=(t == 0),  # Show legend only on first frame
-                    hovertemplate=f'<b>Vehicle {k}</b><extra></extra>'
-                ))
-                
-                # Calculate vehicle position at time t
-                progress = min(t / max_time, 1.0) if max_time > 0 else 0
-                segment_count = len(route_lats) - 1
-                current_segment = int(progress * segment_count)
-                
-                if current_segment < segment_count:
-                    # Interpolate within current segment
-                    segment_progress = (progress * segment_count) - current_segment
-                    
-                    lat1 = route_lats[current_segment]
-                    lon1 = route_lons[current_segment]
-                    lat2 = route_lats[current_segment + 1]
-                    lon2 = route_lons[current_segment + 1]
-                    
-                    vehicle_lat = lat1 + (lat2 - lat1) * segment_progress
-                    vehicle_lon = lon1 + (lon2 - lon1) * segment_progress
-                else:
-                    # At end of route
-                    vehicle_lat = route_lats[-1]
-                    vehicle_lon = route_lons[-1]
-                
-                # Add moving vehicle marker with label
-                frame_data.append(go.Scattergeo(
-                    lat=[vehicle_lat],
-                    lon=[vehicle_lon],
-                    mode='markers+text',
-                    marker=dict(
-                        size=14,
-                        color=colors[k % len(colors)],
-                        symbol='circle',
-                        opacity=0.9
-                    ),
-                    text=f'V{k}',
-                    textposition='middle center',
-                    textfont=dict(size=8, color='white', family='Arial Black'),
-                    name=f'Vehicle {k}',
-                    showlegend=False,
-                    hovertemplate=f'<b>Vehicle {k}</b><br>Time: {t} min<extra></extra>'
-                ))
-        
-        frames.append(go.Frame(data=frame_data, name=str(t)))
-    
-    # Create figure with first frame
-    fig = go.Figure(data=frames[0].data, frames=frames)
-    
-    # Configure mapbox
     center_lat = REAL_GEOGRAPHY["hub"]["latitude"]
     center_lon = REAL_GEOGRAPHY["hub"]["longitude"]
     
-    fig.update_layout(
-        geo=dict(
-            scope='asia',
-            projection_type='mercator',
-            showland=True,
-            landcolor='rgb(230, 230, 230)',
-            showcountries=True,
-            countrycolor='rgb(150, 150, 150)',
-            showlakes=True,
-            lakecolor='rgb(180, 220, 255)',
-            center=dict(lat=center_lat, lon=center_lon),
-            lonaxis=dict(range=[center_lon - 1.5, center_lon + 1.5]),
-            lataxis=dict(range=[center_lat - 1, center_lat + 1]),
-        ),
-        showlegend=True,
-        legend=dict(
-            yanchor="top",
-            y=0.99,
-            xanchor="left",
-            x=0.01,
-            bgcolor="rgba(255,255,255,0.9)",
-            font=dict(size=11)
-        ),
-        height=650,
-        title=dict(
-            text="🚚 Cold Chain Routes - Medinipur District",
-            x=0.5,
-            xanchor='center',
-            font=dict(size=20, color='#667eea')
-        ),
-        margin=dict(l=0, r=0, t=50, b=0),
-        template="plotly_white",  # Ensure white background
-        # Animation controls
-        updatemenus=[{
-            "buttons": [
-                {
-                    "label": "▶️ Play",
-                    "method": "animate",
-                    "args": [None, {
-                        "frame": {"duration": 500, "redraw": True},
-                        "fromcurrent": True,
-                        "mode": "immediate",
-                        "transition": {"duration": 300}
-                    }]
-                },
-                {
-                    "label": "⏸️ Pause",
-                    "method": "animate",
-                    "args": [[None], {
-                        "frame": {"duration": 0, "redraw": False},
-                        "mode": "immediate"
-                    }]
-                }
-            ],
-            "direction": "left",
-            "pad": {"r": 10, "t": 70},
-            "showactive": True,
-            "type": "buttons",
-            "x": 0.1,
-            "xanchor": "left",
-            "y": 0,
-            "yanchor": "bottom",
-            "bgcolor": "#667eea",
-            "font": {"color": "white", "size": 13}
-        }],
-        sliders=[{
-            "active": 0,
-            "steps": [
-                {
-                    "args": [[f.name], {
-                        "frame": {"duration": 0, "redraw": True},
-                        "mode": "immediate"
-                    }],
-                    "label": f"{f.name}m",
-                    "method": "animate"
-                }
-                for f in frames
-            ],
-            "x": 0.1,
-            "len": 0.85,
-            "xanchor": "left",
-            "y": 0,
-            "yanchor": "top",
-            "pad": {"b": 10, "t": 50},
-            "currentvalue": {
-                "prefix": "Time: ",
-                "suffix": " min",
-                "visible": True,
-                "xanchor": "right"
-            }
-        }]
-    )
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
     
-    # Hide the coordinate axes (remove overlay)
-    fig.update_xaxes(visible=False)
-    fig.update_yaxes(visible=False)
+    # Add customers
+    for c in inst.customers:
+        lat, lon = locations[c]
+        folium.Marker(
+            [lat, lon],
+            popup=city_names.get(c, f'C{c}'),
+            tooltip=city_names.get(c, f'C{c}'),
+            icon=folium.Icon(color='blue', icon='info-sign')
+        ).add_to(m)
+        
+    # Add Hub
+    hub_lat, hub_lon = locations[inst.start]
+    folium.Marker(
+        [hub_lat, hub_lon],
+        popup="Hub: " + city_names.get(inst.start, 'Midnapore'),
+        tooltip="Hub",
+        icon=folium.Icon(color='red', icon='star')
+    ).add_to(m)
     
-    return fig
+    colors = ['blue', 'orange', 'green', 'purple', 'red', 'cadetblue']
+    
+    # Add Routes and Vehicles
+    for k, state in sim_res.final_states.items():
+        route = state.route
+        route_coords = []
+        for node in route:
+            if node in locations:
+                route_coords.append(locations[node])
+                
+        if len(route_coords) >= 2:
+            # Get real road geometry
+            full_poly = get_osrm_route(route_coords)
+            if not full_poly:
+                full_poly = route_coords
+                
+            # Draw real road line
+            folium.PolyLine(
+                full_poly,
+                color=colors[k % len(colors)],
+                weight=4,
+                opacity=0.8,
+                tooltip=f'Vehicle {k} Route'
+            ).add_to(m)
+            
+            # Calculate vehicle position at current_sim_time
+            max_time = state.clock_min
+            if max_time > 0:
+                progress = min(current_sim_time / max_time, 1.0)
+            else:
+                progress = 1.0
+                
+            segment_count = len(full_poly) - 1
+            if segment_count > 0:
+                current_segment = int(progress * segment_count)
+                if current_segment < segment_count:
+                    segment_progress = (progress * segment_count) - current_segment
+                    lat1, lon1 = full_poly[current_segment]
+                    lat2, lon2 = full_poly[current_segment + 1]
+                    vehicle_lat = lat1 + (lat2 - lat1) * segment_progress
+                    vehicle_lon = lon1 + (lon2 - lon1) * segment_progress
+                else:
+                    vehicle_lat, vehicle_lon = full_poly[-1]
+                    
+                folium.Marker(
+                    [vehicle_lat, vehicle_lon],
+                    popup=f"Vehicle {k}",
+                    tooltip=f"Vehicle {k} (Time: {current_sim_time:.1f}m)",
+                    icon=folium.Icon(color=colors[k % len(colors)], icon='truck', prefix='fa')
+                ).add_to(m)
+                
+    return m
 
 
-def create_quality_timeline(inst, sim_res):
+def create_quality_timeline(inst, sim_res, current_time=None):
     """Create interactive quality degradation timeline"""
     
     fig = make_subplots(
@@ -332,17 +207,51 @@ def create_quality_timeline(inst, sim_res):
     colors = px.colors.qualitative.Set2
     
     for idx, (k, state) in enumerate(sorted(sim_res.final_states.items())):
+        vehicle_time = state.clock_min
+        if vehicle_time <= 0:
+            vehicle_time = 1.0
+            
         if state.batch_metrics:
             for batch_id, metrics in state.batch_metrics.items():
                 batch = next((s.batch for s in inst.shipments if s.batch.batch_id == batch_id), None)
                 if batch:
-                    # Simple quality timeline (could be enhanced with actual time series)
-                    time_points = [0, metrics.above_safe_minutes / 2, metrics.above_safe_minutes]
-                    quality_points = [
+                    # Original formula structure
+                    original_times = [
+                        0, 
+                        metrics.above_safe_minutes / 2 if hasattr(metrics, 'above_safe_minutes') else vehicle_time / 2, 
+                        metrics.above_safe_minutes if hasattr(metrics, 'above_safe_minutes') else vehicle_time
+                    ]
+                    
+                    original_qualities = [
                         1.0,
                         estimate_quality_remaining(batch, metrics) + 0.15,
                         estimate_quality_remaining(batch, metrics)
                     ]
+                    
+                    # Truncate to current sim time
+                    time_points = []
+                    quality_points = []
+                    
+                    cutoff_time = current_time if current_time is not None else vehicle_time
+                    
+                    for i in range(len(original_times)):
+                        if original_times[i] <= cutoff_time:
+                            time_points.append(original_times[i])
+                            quality_points.append(original_qualities[i])
+                        else:
+                            # Interpolate the cutoff point
+                            if i > 0:
+                                prev_t = original_times[i-1]
+                                next_t = original_times[i]
+                                prev_q = original_qualities[i-1]
+                                next_q = original_qualities[i]
+                                
+                                fraction = (cutoff_time - prev_t) / (next_t - prev_t) if next_t > prev_t else 0
+                                interp_q = prev_q + (next_q - prev_q) * fraction
+                                
+                                time_points.append(cutoff_time)
+                                quality_points.append(interp_q)
+                            break
                     
                     fig.add_trace(
                         go.Scatter(
@@ -350,6 +259,8 @@ def create_quality_timeline(inst, sim_res):
                             y=quality_points,
                             mode='lines+markers',
                             name=f'{batch.produce_type}',
+                            legendgroup=f'{batch.produce_type}',
+                            showlegend=(f'{batch.produce_type}' not in [t.name for t in fig.data]),
                             line=dict(color=colors[batch_id % len(colors)], width=3),
                             marker=dict(size=8),
                             hovertemplate='Time: %{x:.0f} min<br>Quality: %{y:.1%}<extra></extra>'
@@ -364,8 +275,9 @@ def create_quality_timeline(inst, sim_res):
             row=idx+1, col=1
         )
         
+        # Fix the x-axis relative to the full journey so the graph visually "fills up" instead of zooming
         fig.update_yaxes(title_text="Quality %", row=idx+1, col=1, range=[0, 1.05])
-        fig.update_xaxes(title_text="Time (min)", row=idx+1, col=1)
+        fig.update_xaxes(title_text="Time (min)", row=idx+1, col=1, range=[0, vehicle_time * 1.05])
     
     fig.update_layout(
         height=300 * len(sim_res.final_states),
@@ -418,13 +330,15 @@ def create_temperature_heatmap(inst, sim_res):
     return fig
 
 
-def display_reroute_timeline(sim_res):
+def display_reroute_timeline(sim_res, current_time=None):
     """Display reroute decisions as interactive timeline"""
     
     reroute_events = [ev for ev in sim_res.events if ev.event == "REROUTE_APPLIED"]
-    
+    if current_time is not None:
+        reroute_events = [ev for ev in reroute_events if ev.t_min <= current_time]
+        
     if not reroute_events:
-        st.info("ℹ️ No rerouting decisions made during simulation")
+        st.info("ℹ️ No rerouting decisions made yet")
         return
     
     # Create timeline data
@@ -578,6 +492,8 @@ def main():
             
             # Store in session state
             st.session_state['simulation_run'] = True
+            st.session_state['last_real_time'] = time.time()
+            st.session_state['current_sim_time'] = 0.0
             st.session_state['inst'] = inst
             st.session_state['res'] = res
             st.session_state['sim_res'] = sim_res
@@ -593,23 +509,61 @@ def main():
         st.markdown("### 📊 Key Performance Indicators")
         col1, col2, col3 = st.columns(3)
         
-        # Calculate metrics
-        fulfilled = sum(1 for ev in sim_res.events if ev.event == "SERVICE_START" and ev.details.get('node') in inst.customers)
+        
+        # Calculate max simulation time first
+        max_sim_time = 0
+        if sim_res.final_states:
+            max_sim_time = max(state.clock_min for state in sim_res.final_states.values())
+            
+        # Add fast forward control at the top level
+        st.markdown("### 🗺️ Live Route Visualization")
+        speed_multiplier = st.radio(
+            "⏩ Simulation Speed", 
+            options=[1, 5, 10, 30, 60], 
+            format_func=lambda x: "1x (Real Time)" if x == 1 else f"{x}x Fast Forward",
+            horizontal=True
+        )
+        
+        # Time calculation
+        current_real_time = time.time()
+        if 'last_real_time' not in st.session_state:
+            st.session_state['last_real_time'] = current_real_time
+            st.session_state['current_sim_time'] = 0.0
+            
+        delta_real_seconds = current_real_time - st.session_state['last_real_time']
+        st.session_state['last_real_time'] = current_real_time
+        
+        sim_minutes_delta = (delta_real_seconds / 60.0) * speed_multiplier
+        st.session_state['current_sim_time'] += sim_minutes_delta
+        current_sim_time = min(st.session_state['current_sim_time'], max_sim_time)
+        
+        # Progress Bar
+        progress_pct = min(100.0, (current_sim_time / max_sim_time * 100) if max_sim_time > 0 else 100.0)
+        st.progress(progress_pct / 100.0, text=f"Simulation Time: {current_sim_time:.1f} min / {max_sim_time:.1f} min")
+        
+        # Calculate real-time metrics up to current_sim_time
+        fulfilled = sum(1 for ev in sim_res.events if ev.event == "SERVICE_START" and ev.details.get('node') in inst.customers and ev.t_min <= current_sim_time)
         total_customers = len(inst.customers)
         fulfillment_rate = (fulfilled / total_customers * 100) if total_customers > 0 else 0
         
-        # Average quality
+        # Average quality (simplified to just use final state but scale based on time, true tracking would require full event log)
+        # Using final states as approximation since quality only drops
         all_qualities = []
         for state in sim_res.final_states.values():
             if state.batch_metrics:
                 for batch_id, metrics in state.batch_metrics.items():
                     batch = next((s.batch for s in inst.shipments if s.batch.batch_id == batch_id), None)
                     if batch:
-                        all_qualities.append(estimate_quality_remaining(batch, metrics))
-        avg_quality = (sum(all_qualities) / len(all_qualities) * 100) if all_qualities else 0
+                        # Estimate current quality based on fraction of trip complete
+                        fraction = min(1.0, current_sim_time / state.clock_min) if state.clock_min > 0 else 1.0
+                        start_q = 1.0
+                        end_q = estimate_quality_remaining(batch, metrics)
+                        current_q = start_q - (start_q - end_q) * fraction
+                        all_qualities.append(current_q)
+        avg_quality = (sum(all_qualities) / len(all_qualities) * 100) if all_qualities else 100.0
         
-        # Reroute count
-        reroute_count = len([ev for ev in sim_res.events if ev.event == "REROUTE_APPLIED"])
+        # Reroute count up to current time
+        reroute_count = len([ev for ev in sim_res.events if ev.event == "REROUTE_APPLIED" and ev.t_min <= current_sim_time])
         
         # Total distance
         total_dist = res.objective_value if hasattr(res, 'objective_value') else 0
@@ -642,18 +596,14 @@ def main():
             </div>
             """, unsafe_allow_html=True)
         
-        st.markdown("---")
-        
-        # Route Animation Section
-        st.markdown("### 🗺️ Live Route Visualization")
-        route_fig = create_route_animation(inst, sim_res)
-        st.plotly_chart(route_fig, use_container_width=True)
+        route_map = create_live_folium_map(inst, sim_res, current_sim_time)
+        st_folium(route_map, use_container_width=True, height=600, returned_objects=[])
         
         st.markdown("---")
         
         # Reroute Timeline
         st.markdown("### 🔄 Rerouting Decisions")
-        display_reroute_timeline(sim_res)
+        display_reroute_timeline(sim_res, current_sim_time)
         
         st.markdown("---")
         
@@ -662,7 +612,7 @@ def main():
         
         with col_left:
             st.markdown("### 📈 Quality Degradation")
-            quality_fig = create_quality_timeline(inst, sim_res)
+            quality_fig = create_quality_timeline(inst, sim_res, current_sim_time)
             st.plotly_chart(quality_fig, use_container_width=True)
         
         with col_right:
@@ -682,13 +632,18 @@ def main():
                 
                 vehicle_time = state.clock_min
                 
-                with st.expander(f"🚚 Vehicle {k} - {vehicle_dist:.1f} km, {vehicle_time:.0f} min"):
+                with st.expander(f"🚚 Vehicle {k} - {vehicle_dist:.1f} km, {vehicle_time:.0f} min (Final Expected)"):
+                    
+                    # Vehicle status based on current time
+                    status = "Finished" if current_sim_time >= vehicle_time else "En Route" if current_sim_time > 0 else "Waiting"
+                    
                     # Top metrics
                     met1, met2, met3, met4 = st.columns(4)
-                    met1.metric("Distance", f"{vehicle_dist:.1f} km")
-                    met2.metric("Time", f"{vehicle_time:.0f} min")
+                    met1.metric("Status", status)
+                    met2.metric("Est. Total Time", f"{vehicle_time:.0f} min")
                     met3.metric("Delayed", f"{state.delayed_min:.1f} min")
-                    rerouted = "✅ Yes" if state.reroute_triggered else "❌ No"
+                    
+                    rerouted = "✅ Yes" if any(ev.t_min <= current_sim_time for ev in sim_res.events if ev.event == "REROUTE_APPLIED" and ev.vehicle_id == k) else "❌ No"
                     met4.metric("Rerouted", rerouted)
                     
                     st.write("**Route:**", " → ".join(str(n) for n in route))
@@ -707,8 +662,8 @@ def main():
         
         customer_data = []
         for customer in inst.customers:
-            # Check if served
-            served = any(ev.event == "SERVICE_START" and ev.details.get('node') == customer for ev in sim_res.events)
+            # Check if served up to current time
+            served = any(ev.event == "SERVICE_START" and ev.details.get('node') == customer and ev.t_min <= current_sim_time for ev in sim_res.events)
             
             # Get shipment info
             shipment = next((s for s in inst.shipments if s.customer_node_id == customer), None)
@@ -738,6 +693,11 @@ def main():
         
         df_customers = pd.DataFrame(customer_data)
         st.dataframe(df_customers, use_container_width=True, hide_index=True)
+        
+        # Trigger rerun if simulation is still ongoing
+        if current_sim_time < max_sim_time:
+            time.sleep(10)  # Wait 10 seconds between updates as requested
+            st.rerun()
     
     else:
         # Welcome screen
