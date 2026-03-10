@@ -45,8 +45,8 @@ def test_real_geography_imports():
 
 def test_reroute_engine_imports():
     """Test that reroute engine loads correctly"""
-    from reroute_engine import evaluate_reroute_options
-    assert callable(evaluate_reroute_options)
+    from reroute_engine import generate_reroute_options
+    assert callable(generate_reroute_options)
     print("✅ reroute_engine.py imports OK")
 
 

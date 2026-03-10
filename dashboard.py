@@ -118,33 +118,32 @@ def create_route_animation(inst, sim_res):
         customer_lats = [locations[c][0] for c in inst.customers]
         customer_lons = [locations[c][1] for c in inst.customers]
         
-        frame_data.append(go.Scattergeo(
+        frame_data.append(go.Scattermapbox(
             lat=customer_lats,
             lon=customer_lons,
             mode='markers+text',
-            marker=dict(size=10, color='#4169E1', line=dict(width=1, color='white')),
+            marker=dict(size=10, color='#4169E1'),
             text=[city_names.get(c, f'C{c}') for c in inst.customers],
-            textposition='top center',
-            textfont=dict(size=9, color='darkblue', family='Arial Black'),
+            textposition='bottom right',
+            textfont=dict(size=14, color='black', family='Arial Black'),
             name='Customer Cities',
             showlegend=False,
-            hovertext=[city_names.get(c, f'Customer {c}') for c in inst.customers],
-            hoverinfo='text'
+            hoverinfo='none', # Let the text just sit there without interactive hide
         ))
         
         # Static depot (red star with label)
         depot_lat, depot_lon = locations[inst.start]
-        frame_data.append(go.Scattergeo(
+        frame_data.append(go.Scattermapbox(
             lat=[depot_lat],
             lon=[depot_lon],
             mode='markers+text',
-            marker=dict(size=18, color='red', symbol='star', line=dict(width=2, color='darkred')),
-            text=city_names.get(inst.start, 'Midnapore'),
+            marker=dict(size=18, color='red'),
+            text=[city_names.get(inst.start, 'Midnapore')],
             textposition='bottom center',
-            textfont=dict(size=11, color='darkred', family='Arial Black'),
+            textfont=dict(size=14, color='darkred', family='Arial Black'),
             name=f'{city_names.get(inst.start, "Midnapore")} (Hub)',
             showlegend=False,
-            hovertext=city_names.get(inst.start, 'HUB'),
+            hovertext=[city_names.get(inst.start, 'HUB')],
             hoverinfo='text'
         ))
         
@@ -161,7 +160,7 @@ def create_route_animation(inst, sim_res):
             
             if len(route_lats) >= 2:
                 # Draw route line
-                frame_data.append(go.Scattergeo(
+                frame_data.append(go.Scattermapbox(
                     lat=route_lats,
                     lon=route_lons,
                     mode='lines',
@@ -193,19 +192,18 @@ def create_route_animation(inst, sim_res):
                     vehicle_lon = route_lons[-1]
                 
                 # Add moving vehicle marker with label
-                frame_data.append(go.Scattergeo(
+                frame_data.append(go.Scattermapbox(
                     lat=[vehicle_lat],
                     lon=[vehicle_lon],
                     mode='markers+text',
                     marker=dict(
                         size=14,
                         color=colors[k % len(colors)],
-                        symbol='circle',
                         opacity=0.9
                     ),
-                    text=f'V{k}',
+                    text=[f'V{k}'],
                     textposition='middle center',
-                    textfont=dict(size=8, color='white', family='Arial Black'),
+                    textfont=dict(size=10, color='white', family='Arial Black'),
                     name=f'Vehicle {k}',
                     showlegend=False,
                     hovertemplate=f'<b>Vehicle {k}</b><br>Time: {t} min<extra></extra>'
@@ -221,18 +219,10 @@ def create_route_animation(inst, sim_res):
     center_lon = REAL_GEOGRAPHY["hub"]["longitude"]
     
     fig.update_layout(
-        geo=dict(
-            scope='asia',
-            projection_type='mercator',
-            showland=True,
-            landcolor='rgb(230, 230, 230)',
-            showcountries=True,
-            countrycolor='rgb(150, 150, 150)',
-            showlakes=True,
-            lakecolor='rgb(180, 220, 255)',
+        mapbox=dict(
+            style='carto-positron',
             center=dict(lat=center_lat, lon=center_lon),
-            lonaxis=dict(range=[center_lon - 1.5, center_lon + 1.5]),
-            lataxis=dict(range=[center_lat - 1, center_lat + 1]),
+            zoom=8.5
         ),
         showlegend=True,
         legend=dict(
@@ -418,7 +408,7 @@ def create_temperature_heatmap(inst, sim_res):
     return fig
 
 
-def display_reroute_timeline(sim_res):
+def display_reroute_timeline(sim_res, inst, res):
     """Display reroute decisions as interactive timeline"""
     
     reroute_events = [ev for ev in sim_res.events if ev.event == "REROUTE_APPLIED"]
@@ -427,14 +417,31 @@ def display_reroute_timeline(sim_res):
         st.info("ℹ️ No rerouting decisions made during simulation")
         return
     
+    # Dictionaries for user-friendly labels
+    reason_map = {
+        "TEMP_EXCURSION": "Extended Temperature Excursion",
+        "CUMULATIVE_ABUSE": "High Total Temperature Abuse",
+        "LOW_QUALITY": "Critical Quality Drop",
+        "PREDICTED_LATE": "Predicted Late Arrival"
+    }
+    
+    decision_map = {
+        "skip_customer": "Skip Customer Location",
+        "swap_order": "Swap Delivery Order",
+        "return_to_hub": "Return to Hub Immediately"
+    }
+    
     # Create timeline data
     timeline_data = []
     for ev in reroute_events:
+        raw_reason = ev.details.get('reason', 'Unknown')
+        raw_decision = ev.details.get('option_selected', 'N/A')
+        
         timeline_data.append({
             'Time': ev.t_min,
             'Vehicle': f'Vehicle {ev.vehicle_id}',
-            'Reason': ev.details.get('reason', 'Unknown'),
-            'Decision': ev.details.get('option_selected', 'N/A'),
+            'Reason': reason_map.get(raw_reason, raw_reason.replace("_", " ").title()),
+            'Decision': decision_map.get(raw_decision, raw_decision.replace("_", " ").title()),
             'Score': ev.details.get('score', 0)
         })
     
@@ -454,10 +461,223 @@ def display_reroute_timeline(sim_res):
     # Show details in expandable sections
     for i, event in enumerate(reroute_events):
         with st.expander(f"🔄 Decision #{i+1} - Time: {event.t_min:.1f} min - Vehicle {event.vehicle_id}"):
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Trigger Reason", event.details.get('reason', 'N/A'))
-            col2.metric("Option Chosen", event.details.get('option_selected', 'N/A'))
-            col3.metric("Decision Score", f"{event.details.get('score', 0):.2f}")
+            col1, col2 = st.columns(2)
+            
+            raw_reason = event.details.get('reason', 'N/A')
+            raw_decision = event.details.get('option_selected', 'N/A')
+            
+            friendly_reason = reason_map.get(raw_reason, raw_reason.replace("_", " ").title())
+            friendly_decision = decision_map.get(raw_decision, raw_decision.replace("_", " ").title())
+            
+            col1.markdown(f"<div style='font-size:0.75rem;color:#aaa'>Trigger Reason</div><div style='font-size:1rem;font-weight:600'>{friendly_reason}</div>", unsafe_allow_html=True)
+            col2.markdown(f"<div style='font-size:0.75rem;color:#aaa'>Option Chosen</div><div style='font-size:1rem;font-weight:600'>{friendly_decision}</div>", unsafe_allow_html=True)
+
+            # If skip_customer, show exactly which customer is being skipped
+            if raw_decision == "skip_customer":
+                option_name = event.details.get('option_name', '')
+                skipped_node = None
+                try:
+                    node_str = option_name.split("Skip customer ")[1].split(" ")[0]
+                    skipped_node = int(node_str)
+                except:
+                    pass
+                
+                if skipped_node is not None:
+                    if hasattr(inst, 'node_meta') and skipped_node in inst.node_meta:
+                        skipped_name = inst.node_meta[skipped_node].name
+                    else:
+                        from real_geography import REAL_GEOGRAPHY
+                        city_name_map = {c["id"]: c["name"] for c in REAL_GEOGRAPHY["customers"]}
+                        skipped_name = city_name_map.get(skipped_node, f"Node {skipped_node}")
+                    st.markdown(f"**📍 Customer Being Skipped: {skipped_name}**")
+
+
+def create_quality_figure_for_vehicle(inst, sim_res, vehicle_k):
+    """Quality degradation over ACTUAL simulation time (0→300 min) using log_rows"""
+    state = sim_res.final_states.get(vehicle_k)
+    if not state or not state.batch_metrics:
+        fig = go.Figure()
+        fig.add_annotation(text="No batch data", xref="paper", yref="paper",
+                           x=0.5, y=0.5, showarrow=False, font=dict(size=14, color="gray"))
+        fig.update_layout(height=550, title=f"Vehicle {vehicle_k}")
+        return fig
+
+    # Build per-batch time-series from log_rows
+    batch_timeseries = {}   # batch_id -> {"t": [], "q": []}
+    for row in sim_res.log_rows:
+        if row.get("vehicle") != vehicle_k:
+            continue
+        t = row["t_min"]
+        for bid, q in row.get("batch_qualities", {}).items():
+            if bid not in batch_timeseries:
+                batch_timeseries[bid] = {"t": [], "q": []}
+            batch_timeseries[bid]["t"].append(t)
+            batch_timeseries[bid]["q"].append(q)
+
+    # Build rich batch info: batch_id -> {produce, city, delivered}
+    from real_geography import REAL_GEOGRAPHY
+    city_name_map = {c["id"]: c["name"] for c in REAL_GEOGRAPHY["customers"]}
+
+    # Which customer nodes were actually delivered this simulation?
+    delivered_nodes = {
+        ev.details.get("node")
+        for ev in sim_res.events
+        if ev.event == "SERVICE_START"
+    }
+
+    # batch_id -> (produce_type, city_name, delivered)
+    batch_info = {}
+    for s in inst.shipments:
+        bid = s.batch.batch_id
+        city = city_name_map.get(s.customer_node_id, f"C{s.customer_node_id}")
+        delivered = s.customer_node_id in delivered_nodes
+        batch_info[bid] = (s.batch.produce_type.capitalize(), city, delivered)
+
+    colors = px.colors.qualitative.Bold
+    fig = go.Figure()
+
+    for idx, (batch_id, series) in enumerate(sorted(batch_timeseries.items())):
+        produce, city, delivered = batch_info.get(
+            batch_id, (f"Batch {batch_id}", "Unknown", True)
+        )
+        not_delivered_tag = " ❌ Not Delivered" if not delivered else ""
+        label = f"{produce} · {city}{not_delivered_tag}"
+
+        fig.add_trace(go.Scatter(
+            x=series["t"], y=series["q"],
+            mode="lines",
+            name=label,
+            line=dict(
+                color=colors[idx % len(colors)],
+                width=2.5,
+                dash="dot" if not delivered else "solid"   # dashed if not delivered
+            ),
+            hovertemplate=f"<b>{label}</b><br>Sim Time: %{{x:.0f}} min<br>Quality: %{{y:.1%}}<extra></extra>"
+        ))
+
+    # Min quality threshold line
+    fig.add_hline(y=0.60, line_dash="dash", line_color="#eb3349", line_width=2,
+                  annotation_text="Min Quality (60%)",
+                  annotation_position="bottom right",
+                  annotation_font_color="#eb3349")
+
+    # Mark reroute events as vertical lines
+    for ev in sim_res.events:
+        if ev.vehicle_id == vehicle_k and ev.event == "REROUTE_APPLIED":
+            fig.add_vline(x=ev.t_min, line_dash="dot", line_color="#f2994a", line_width=2,
+                          annotation_text=f"🔄 Reroute",
+                          annotation_font_color="#f2994a", annotation_position="top left")
+
+    fig.update_layout(
+        height=550,
+        showlegend=True,
+        title=dict(text=f"🚚 Vehicle {vehicle_k} — Quality Degradation Over Travel Time",
+                   font=dict(size=15, color="#667eea"), x=0.5, xanchor="center"),
+        xaxis_title="Travel Time (min)",
+        yaxis_title="Quality Remaining",
+        yaxis=dict(range=[0, 1.08], tickformat=".0%", gridcolor="rgba(255,255,255,0.1)"),
+        xaxis=dict(gridcolor="rgba(255,255,255,0.1)"),
+        legend=dict(
+            orientation="v",
+            x=0.01, y=0.01,          # inside bottom-left — always visible
+            xanchor="left", yanchor="bottom",
+            font=dict(size=12, color="white"),
+            bgcolor="rgba(20,20,35,0.75)",
+            bordercolor="#667eea", borderwidth=1
+        ),
+        margin=dict(l=50, r=40, t=60, b=50),   # reduced right margin (legend is inside now)
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(20,20,35,0.6)",
+        font=dict(color="white")
+    )
+    return fig
+
+
+def create_temperature_figure_for_vehicle(inst, sim_res, vehicle_k):
+    """Per-vehicle compartment temperature over ACTUAL travel time (0→300 min) using log_rows"""
+    state = sim_res.final_states.get(vehicle_k)
+    vehicle_meta = inst.vehicle_meta.get(vehicle_k)
+    if not state or not vehicle_meta:
+        fig = go.Figure()
+        fig.add_annotation(text="No temperature data", xref="paper", yref="paper",
+                           x=0.5, y=0.5, showarrow=False, font=dict(size=14, color="gray"))
+        fig.update_layout(height=480, title=f"Vehicle {vehicle_k}")
+        return fig
+
+    # Build per-compartment time-series from log_rows
+    # log_rows has: {t_min, vehicle, comp_temps: {comp_id: temp}}
+    comp_timeseries = {}   # comp_id -> {"t": [], "temp": []}
+    for row in sim_res.log_rows:
+        if row.get("vehicle") != vehicle_k:
+            continue
+        t = row["t_min"]
+        for cid, temp in row.get("comp_temps", {}).items():
+            if cid not in comp_timeseries:
+                comp_timeseries[cid] = {"t": [], "temp": []}
+            comp_timeseries[cid]["t"].append(t)
+            comp_timeseries[cid]["temp"].append(temp)
+
+    comp_label_map = {"A": "Compartment A: Dairy", "B": "Compartment B: Produce", "C": "Compartment C: Flowers"}
+    comp_color_map = {"A": "#4169E1", "B": "#56ab2f", "C": "#f2994a"}
+
+    fig = go.Figure()
+
+    for comp_id, series in sorted(comp_timeseries.items()):
+        label = comp_label_map.get(comp_id, f"Compartment {comp_id}")
+        color = comp_color_map.get(comp_id, "#ffffff")
+        setpoint = vehicle_meta.compartments[comp_id].setpoint_c
+
+        # Actual Temp Line
+        fig.add_trace(go.Scatter(
+            x=series["t"], y=series["temp"],
+            mode="lines",
+            name=f"{label}",
+            line=dict(color=color, width=2.5),
+            hovertemplate=f"<b>{label}</b><br>Travel Time: %{{x:.0f}} min<br>Temperature: %{{y:.2f}}°C<extra></extra>"
+        ))
+        
+        # Setpoint Line (Dashed)
+        fig.add_trace(go.Scatter(
+            x=[series["t"][0], series["t"][-1]] if series["t"] else [0, 1],
+            y=[setpoint, setpoint],
+            mode="lines",
+            name=f"{label} (Setpoint)",
+            line=dict(color=color, width=1.5, dash="dash"),
+            opacity=0.6,
+            hovertemplate=f"Setpoint: %{{y:.1f}}°C<extra></extra>",
+            showlegend=False  # Hide setpoint from legend to reduce clutter, it's obvious from color
+        ))
+
+    # Mark reroute events as vertical lines
+    for ev in sim_res.events:
+        if ev.vehicle_id == vehicle_k and ev.event == "REROUTE_APPLIED":
+            fig.add_vline(x=ev.t_min, line_dash="dot", line_color="#f2994a", line_width=2,
+                          annotation_text=f"🔄 Reroute",
+                          annotation_font_color="#f2994a", annotation_position="top left")
+
+    fig.update_layout(
+        height=480,
+        showlegend=True,
+        title=dict(text=f"🌡️ Vehicle {vehicle_k} — Compartment Temperatures Over Time",
+                   font=dict(size=15, color="#667eea"), x=0.5, xanchor="center"),
+        xaxis_title="Travel Time (min)",
+        yaxis_title="Temperature (°C)",
+        legend=dict(
+            orientation="v",
+            x=0.01, y=0.01,          # inside bottom-left
+            xanchor="left", yanchor="bottom",
+            font=dict(size=12, color="white"),
+            bgcolor="rgba(20,20,35,0.75)",
+            bordercolor="#667eea", borderwidth=1
+        ),
+        margin=dict(l=50, r=40, t=60, b=50),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(20,20,35,0.6)",
+        font=dict(color="white"),
+        yaxis=dict(gridcolor="rgba(255,255,255,0.1)"),
+        xaxis=dict(gridcolor="rgba(255,255,255,0.1)"),
+    )
+    return fig
 
 
 def main():
@@ -650,94 +870,336 @@ def main():
         st.plotly_chart(route_fig, use_container_width=True)
         
         st.markdown("---")
-        
+
         # Reroute Timeline
         st.markdown("### 🔄 Rerouting Decisions")
-        display_reroute_timeline(sim_res)
-        
+        display_reroute_timeline(sim_res, inst, res)
+
         st.markdown("---")
-        
-        # Two column layout for graphs
-        col_left, col_right = st.columns(2)
-        
-        with col_left:
-            st.markdown("### 📈 Quality Degradation")
-            quality_fig = create_quality_timeline(inst, sim_res)
-            st.plotly_chart(quality_fig, use_container_width=True)
-        
-        with col_right:
-            st.markdown("### 🌡️ Temperature Status")
-            temp_fig = create_temperature_heatmap(inst, sim_res)
-            st.plotly_chart(temp_fig, use_container_width=True)
-            
-            st.markdown("### 📋 Vehicle Summary")
-            for k, state in sorted(sim_res.final_states.items()):
-                # Calculate distance and time for this vehicle
-                route = state.route
-                vehicle_dist = 0.0
-                for i in range(len(route) - 1):
-                    from_node = route[i]
-                    to_node = route[i + 1]
-                    vehicle_dist += inst.dist.get((from_node, to_node), 0.0)
+
+        # Vehicle Summary — horizontal cards, one per vehicle
+        st.markdown("### � Vehicle Summary Statistics")
+        veh_keys = sorted(sim_res.final_states.keys())
+        veh_sum_cols = st.columns(len(veh_keys))
+        for col_idx, k in enumerate(veh_keys):
+            state = sim_res.final_states[k]
+            route = state.route
+            vehicle_dist = sum(
+                inst.dist.get((route[i], route[i+1]), 0.0)
+                for i in range(len(route) - 1)
+            )
+            vehicle_time = state.clock_min
+            with veh_sum_cols[col_idx]:
+                has_actual_reroute = any(ev.event == "REROUTE_APPLIED" and ev.vehicle_id == k for ev in sim_res.events)
+                rerouted_label = "✅ Yes" if has_actual_reroute else "❌ No"
+                route_str = " → ".join(
+                    "Depot" if n in (inst.start, inst.end) else (inst.node_meta[n].name if hasattr(inst, 'node_meta') and n in inst.node_meta else str(n))
+                    for n in route
+                )
                 
-                vehicle_time = state.clock_min
+                card_html = f"""
+                <div style='background:linear-gradient(135deg,#1a1a2e,#16213e);
+                            border:1px solid #667eea; border-radius:12px;
+                            padding:1rem; margin-bottom:0.5rem;'>
+                    <h4 style='color:#667eea;margin:0'>🚚 Vehicle {k}</h4>
+                    <hr style='border-color:#667eea33;margin:0.5rem 0'/>
+                    <p style='margin:0.2rem 0'><b>Distance:</b> {vehicle_dist:.1f} km</p>
+                    <p style='margin:0.2rem 0'><b>Duration:</b> {vehicle_time:.0f} min</p>
+                    <p style='margin:0.2rem 0'><b>Rerouted:</b> {rerouted_label}</p>
+                    <hr style='border-color:#667eea33;margin:0.5rem 0'/>
+                    <p style='margin:0.2rem 0;font-size:0.72rem;line-height:1.4'><b>Route:</b> {route_str}</p>
+                """
+
+                # Find skipped customers for this vehicle
+                skipped_names = []
+                for ev in sim_res.events:
+                    if ev.event == "REROUTE_APPLIED" and ev.vehicle_id == k and ev.details.get('option_selected') == "skip_customer":
+                        opt = ev.details.get('option_name', '')
+                        try:
+                            nid = int(opt.split("Skip customer ")[1].split(" ")[0])
+                            skipped_names.append(inst.node_meta[nid].name if nid in inst.node_meta else str(nid))
+                        except: pass
                 
-                with st.expander(f"🚚 Vehicle {k} - {vehicle_dist:.1f} km, {vehicle_time:.0f} min"):
-                    # Top metrics
-                    met1, met2, met3, met4 = st.columns(4)
-                    met1.metric("Distance", f"{vehicle_dist:.1f} km")
-                    met2.metric("Time", f"{vehicle_time:.0f} min")
-                    met3.metric("Delayed", f"{state.delayed_min:.1f} min")
-                    rerouted = "✅ Yes" if state.reroute_triggered else "❌ No"
-                    met4.metric("Rerouted", rerouted)
+                # Find refused customers (quality below threshold at door) for this vehicle
+                refused_names = []
+                # Also include customers who were on the original plan but not visited (if not explicitly skipped above)
+                # First, find original route mapping (we have customer_to_veh from further down, but we can compute it here locally)
+                orig_route = res.routes.get(k, []) if hasattr(res, 'routes') else []
+                for nid in orig_route:
+                    if nid in inst.customers:
+                        # Were they served?
+                        served = any(e.event == "SERVICE_START" and e.vehicle_id == k and e.details.get('node') == nid for e in sim_res.events)
+                        if not served:
+                            cname = inst.node_meta[nid].name if nid in inst.node_meta else str(nid)
+                            refused = any(e.event == 'SERVICE_REFUSED' and e.vehicle_id == k and e.details.get('node') == nid for e in sim_res.events)
+                            if refused:
+                                refused_names.append(cname)
+                            elif cname not in skipped_names:
+                                # Could happen if reroute skipped them implicitly, but let's just log as refused/undelivered
+                                refused_names.append(cname)
+
+                # Append HTML for Skipped
+                if skipped_names:
+                    card_html += f"<p style='margin:0.2rem 0;color:#ff9f43;font-size:0.7rem'><b>📉 Skipped:</b> {', '.join(skipped_names)}</p>"
+                else:
+                    card_html += f"<p style='margin:0.2rem 0;color:#555;font-size:0.7rem'><b>📉 Skipped:</b> None</p>"
                     
-                    st.write("**Route:**", " → ".join(str(n) for n in route))
+                # Append HTML for Refused
+                if refused_names:
+                    card_html += f"<p style='margin:0.2rem 0;color:#ff6b81;font-size:0.7rem'><b>⚠️ Refused (Quality):</b> {', '.join(refused_names)}</p>"
+                else:
+                    card_html += f"<p style='margin:0.2rem 0;color:#555;font-size:0.7rem'><b>⚠️ Refused (Quality):</b> None</p>"
                     
-                    st.write("**Compartment Temperatures:**")
-                    for comp, temp in state.compartment_temps.items():
-                        setpoint = inst.vehicle_meta[k].compartments[comp].setpoint_c
-                        deviation = temp - setpoint
-                        color = "🔴" if abs(deviation) > 3 else "🟡" if abs(deviation) > 1 else "🟢"
-                        st.write(f"{color} {comp}: {temp:.2f}°C (setpoint: {setpoint}°C, deviation: {deviation:+.2f}°C)")
-        
+                card_html += "</div>"
+                
+                st.markdown(card_html, unsafe_allow_html=True)
+                st.markdown("**Average temperature values:**")
+                for comp, temp in state.compartment_temps.items():
+                    setpoint = inst.vehicle_meta[k].compartments[comp].setpoint_c
+                    dev = temp - setpoint
+                    icon = "🔴" if abs(dev) > 3 else "🟡" if abs(dev) > 1 else "🟢"
+                    st.write(f"{icon} **Compartment {comp}**: {temp:.2f}°C &nbsp; (setpoint {setpoint}°C, Δ{dev:+.2f}°C)")
+
         st.markdown("---")
-        
+
+        # Quality Degradation — full-width, one plot per vehicle stacked
+        st.markdown("### 📈 Quality Degradation Per Vehicle")
+        for k in veh_keys:
+            q_fig = create_quality_figure_for_vehicle(inst, sim_res, k)
+            st.plotly_chart(q_fig, use_container_width=True)
+
+        st.markdown("---")
+
+        # Temperature Status — full-width, one plot per vehicle stacked
+        st.markdown("### 🌡️ Vehicle Temperature Status")
+        for k in veh_keys:
+            t_fig = create_temperature_figure_for_vehicle(inst, sim_res, k)
+            st.plotly_chart(t_fig, use_container_width=True)
+
+        st.markdown("---")
+
         # Customer Fulfillment Table
         st.markdown("### 👥 Customer Fulfillment Details")
-        
+        from real_geography import REAL_GEOGRAPHY
+        city_name_map = {c["id"]: c["name"] for c in REAL_GEOGRAPHY["customers"]}
+
+        # Determine which vehicle each customer was originally assigned to from res.routes
+        customer_to_veh = {}
+        if res and hasattr(res, 'routes'):
+            for k, route in res.routes.items():
+                for node in route:
+                    if node in inst.customers:
+                        customer_to_veh[node] = k
+
         customer_data = []
         for customer in inst.customers:
-            # Check if served
-            served = any(ev.event == "SERVICE_START" and ev.details.get('node') == customer for ev in sim_res.events)
-            
-            # Get shipment info
+            served = any(ev.event == "SERVICE_START" and ev.details.get('node') == customer
+                         for ev in sim_res.events)
             shipment = next((s for s in inst.shipments if s.customer_node_id == customer), None)
             if shipment:
                 batch = shipment.batch
-                product = batch.produce_type
-                units = shipment.demand_units
-                
-                # Get quality if served
+                vehicle_k = customer_to_veh.get(customer, "Unknown")
+                city_name = city_name_map.get(customer, f"C{customer}")
+
                 if served:
-                    for state in sim_res.final_states.values():
+                    for k, state in sim_res.final_states.items():
                         if batch.batch_id in state.batch_metrics:
                             quality = estimate_quality_remaining(batch, state.batch_metrics[batch.batch_id])
+                            vehicle_k = k  # update to actual vehicle that served it if it changed
                             break
                     else:
                         quality = 0
                 else:
                     quality = None
-                
+                    
+                # Determine failure reason if not delivered
+                reason = "-"
+                if not served:
+                    refused = any(ev.event == "SERVICE_REFUSED" and ev.details.get('node') == customer
+                                  for ev in sim_res.events)
+                    if refused:
+                        reason = "⚠️ Quality Below Threshold"
+                    elif vehicle_k != "Unknown":
+                        reason = "📉 Skipped (Autonomous Reroute)"
+                    else:
+                        reason = "❌ Unassigned"
+
                 customer_data.append({
-                    'Customer': f'C{customer}',
-                    'Product': product,
-                    'Units': units,
+                    'Customer': city_name,
+                    'Product': batch.produce_type.capitalize(),
+                    'Units': shipment.demand_units,
+                    'Vehicle': f"Vehicle {vehicle_k}" if vehicle_k != "Unknown" else "Unassigned",
                     'Status': '✅ Delivered' if served else '❌ Not Delivered',
-                    'Quality': f'{quality:.1%}' if quality is not None else 'N/A'
+                    'Final Quality Delivered': f'{quality:.1%}' if quality is not None else 'N/A',
+                    'Failure Reason': reason
                 })
-        
         df_customers = pd.DataFrame(customer_data)
         st.dataframe(df_customers, use_container_width=True, hide_index=True)
+
+        # ── Download Section ──────────────────────────────────────────────────────
+        st.markdown("---")
+        st.markdown("### 📦 Download Simulation Results")
+        st.markdown("<p style='color:#aaa;font-size:0.85rem'>All files are generated from the latest simulation run.</p>", unsafe_allow_html=True)
+
+        import io, json, zipfile
+        from datetime import datetime
+        run_ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+        # ── 1. Customer Fulfillment CSV ───────────────────────────────────────────
+        df_dl = df_customers.copy()
+        df_dl['Status'] = df_dl['Status'].str.replace('✅ ', '').str.replace('❌ ', '')
+        df_dl['Failure Reason'] = df_dl['Failure Reason'].str.replace('⚠️ ', '').str.replace('📉 ', '').str.replace('❌ ', '')
+        csv_fulfillment = df_dl.to_csv(index=False).encode()
+
+        # ── 2. Rerouting Decisions JSON ───────────────────────────────────────────
+        reroute_events = [ev for ev in sim_res.events if ev.event == "REROUTE_APPLIED"]
+        reroute_list = []
+        for ev in reroute_events:
+            raw_decision = ev.details.get('option_selected', 'N/A')
+            skipped_city = None
+            if raw_decision == "skip_customer":
+                option_name = ev.details.get('option_name', '')
+                try:
+                    node_id = int(option_name.split("Skip customer ")[1].split(" ")[0])
+                    skipped_city = inst.node_meta[node_id].name if node_id in inst.node_meta else str(node_id)
+                except: pass
+            reroute_list.append({
+                "time_min": ev.t_min,
+                "vehicle_id": ev.vehicle_id,
+                "trigger_reason": ev.details.get('reason'),
+                "option_chosen": raw_decision,
+                "skipped_customer": skipped_city,
+                "score": ev.details.get('score'),
+            })
+        json_reroute = json.dumps(reroute_list, indent=2).encode()
+
+        # ── 3. Quality Degradation CSV (5-min intervals) ──────────────────────────
+        INTERVAL = 5  # minutes
+        # Group log_rows by 5-min bucket, take last row in each bucket per vehicle
+        from collections import defaultdict
+        bucket_map = defaultdict(dict)  # bucket -> vehicle -> row
+        for row in sim_res.log_rows:
+            bucket = int(row['t_min'] // INTERVAL) * INTERVAL
+            bucket_map[bucket][row['vehicle']] = row
+        
+        q_rows = []
+        # Build shipment info lookup: batch_id -> (produce_type, customer_name)
+        batch_info = {}
+        for shipment in inst.shipments:
+            cname = inst.node_meta[shipment.customer_node_id].name if shipment.customer_node_id in inst.node_meta else str(shipment.customer_node_id)
+            batch_info[shipment.batch.batch_id] = (shipment.batch.produce_type, cname)
+        
+        for bucket in sorted(bucket_map):
+            for veh_id, row in bucket_map[bucket].items():
+                base = {'time_min': bucket, 'vehicle_id': veh_id}
+                bq = row.get('batch_qualities', {})
+                for bid, q in bq.items():
+                    p_type, cname = batch_info.get(bid, ('unknown', f'batch_{bid}'))
+                    base[f'quality_{cname}_{p_type}_pct'] = round(q * 100, 2)
+                q_rows.append(base)
+        csv_quality = pd.DataFrame(q_rows).fillna('').to_csv(index=False).encode()
+
+        # ── 4. Temperature Log CSV (5-min intervals, per compartment) ─────────────
+        temp_rows = []
+        for bucket in sorted(bucket_map):
+            for veh_id, row in bucket_map[bucket].items():
+                comp_temps = row.get('comp_temps', {})
+                base_row = {'time_min': bucket, 'vehicle_id': veh_id}
+                veh = inst.vehicle_meta.get(veh_id)
+                for comp_id, temp in comp_temps.items():
+                    setpoint = veh.compartments[comp_id].setpoint_c if (veh and comp_id in veh.compartments) else 0
+                    base_row[f'comp_{comp_id}_temp_c'] = temp
+                    base_row[f'comp_{comp_id}_setpoint_c'] = setpoint
+                    base_row[f'comp_{comp_id}_delta_c'] = round(temp - setpoint, 2)
+                temp_rows.append(base_row)
+        csv_temp = pd.DataFrame(temp_rows).fillna('').to_csv(index=False).encode()
+
+        # ── 5. Vehicle Trajectory CSV (5-min intervals, lat/lon/location) ─────────
+        # Build reverse lookup: (lat, lon) → customer name for snapping
+        coord_to_name = {}
+        for node_id, (lat, lon) in inst.coords.items():
+            if node_id in (inst.start, inst.end):
+                coord_to_name[(round(lat, 5), round(lon, 5))] = 'Depot (Midnapore)'
+            elif node_id in inst.node_meta:
+                coord_to_name[(round(lat, 5), round(lon, 5))] = inst.node_meta[node_id].name
+
+        route_rows = []
+        for bucket in sorted(bucket_map):
+            for veh_id, row in bucket_map[bucket].items():
+                curr_node = row.get('current_node')
+                next_node = row.get('next_node')
+                rem_dist = row.get('remaining_dist_to_next', 0.0)
+
+                # Interpolate position between current and next node
+                if curr_node in inst.coords and next_node in inst.coords:
+                    c_lat, c_lon = inst.coords[curr_node]
+                    n_lat, n_lon = inst.coords[next_node]
+                    arc = inst.dist.get((curr_node, next_node), 1.0)
+                    frac = max(0.0, min(1.0, 1.0 - rem_dist / arc)) if arc > 0 else 0.0
+                    lat = round(c_lat + frac * (n_lat - c_lat), 6)
+                    lon = round(c_lon + frac * (n_lon - c_lon), 6)
+                elif curr_node in inst.coords:
+                    lat, lon = inst.coords[curr_node]
+                    lat, lon = round(lat, 6), round(lon, 6)
+                else:
+                    lat, lon = None, None
+
+                # Snap to named location if exactly at a node
+                location = coord_to_name.get((round(lat, 5), round(lon, 5)), '') if lat and lon else ''
+                # Also check if at current_node exactly (rem_dist ≈ 0 or frac≈0)
+                if not location and curr_node in inst.node_meta and (next_node is None or rem_dist < 0.1):
+                    location = inst.node_meta[curr_node].name
+                if not location and curr_node in (inst.start, inst.end):
+                    location = 'Depot (Midnapore)'
+
+                route_rows.append({
+                    'time_min': bucket,
+                    'vehicle_id': veh_id,
+                    'latitude': lat,
+                    'longitude': lon,
+                    'at_location': location,
+                    'current_node': curr_node,
+                })
+        csv_routes = pd.DataFrame(route_rows).to_csv(index=False).encode()
+
+        # ── Render Download Buttons ───────────────────────────────────────────────
+        file_defs = [
+            ("📋 Customer Fulfillment", csv_fulfillment, f"customer_fulfillment_{run_ts}.csv", "text/csv"),
+            ("🔄 Rerouting Decisions", json_reroute, f"reroute_decisions_{run_ts}.json", "application/json"),
+            ("🧪 Quality Degradation", csv_quality, f"quality_log_{run_ts}.csv", "text/csv"),
+            ("🌡️ Temperature Log", csv_temp, f"temperature_log_{run_ts}.csv", "text/csv"),
+            ("🚚 Vehicle Route Report", csv_routes, f"vehicle_routes_{run_ts}.csv", "text/csv"),
+        ]
+
+        # Individual buttons in a row
+        dl_cols = st.columns(len(file_defs))
+        for col, (label, data, fname, mime) in zip(dl_cols, file_defs):
+            with col:
+                st.markdown(f"""
+                <div style='border:1px solid #667eea44; border-radius:10px; padding:0.6rem;
+                            background:linear-gradient(135deg,#1a1a2e,#16213e);
+                            text-align:center; margin-bottom:0.4rem'>
+                    <div style='font-size:1.4rem'>{label.split()[0]}</div>
+                    <div style='font-size:0.7rem;color:#aaa'>{label[2:].strip()}</div>
+                </div>""", unsafe_allow_html=True)
+                st.download_button(label="⬇ Download", data=data, file_name=fname, mime=mime, use_container_width=True, key=f"dl_{fname}")
+
+        # All-in-one ZIP
+        st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for _, data, fname, _ in file_defs:
+                zf.writestr(fname, data)
+        zip_buf.seek(0)
+        st.download_button(
+            label="🗜️ Download All 5 Files as ZIP",
+            data=zip_buf,
+            file_name=f"simulation_results_{run_ts}.zip",
+            mime="application/zip",
+            use_container_width=True,
+            key="dl_all_zip"
+        )
+
     
     else:
         # Welcome screen
