@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install streamlit plotly pandas numpy matplotlib
+          pip install streamlit plotly pandas numpy matplotlib pytest
 
       # Step 4: Run tests
       - name: Run smoke tests
