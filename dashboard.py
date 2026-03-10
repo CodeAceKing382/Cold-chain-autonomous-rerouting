@@ -205,6 +205,9 @@ def create_quality_timeline(inst, sim_res, current_time=None):
     )
     
     colors = px.colors.qualitative.Set2
+    # Create stable dictionary mapping produce_type -> color to prevent mismatch
+    produce_color_map = {}
+    color_idx = 0
     
     for idx, (k, state) in enumerate(sorted(sim_res.final_states.items())):
         vehicle_time = state.clock_min
@@ -253,15 +256,24 @@ def create_quality_timeline(inst, sim_res, current_time=None):
                                 quality_points.append(interp_q)
                             break
                     
+                    # Ensure consistent color mapping for this specific produce type
+                    p_type = batch.produce_type
+                    if p_type not in produce_color_map:
+                        produce_color_map[p_type] = colors[color_idx % len(colors)]
+                        color_idx += 1
+                        
+                    # Track if we already added a legend entry for this product globally
+                    show_in_legend = (p_type not in [t.name for t in fig.data])
+                    
                     fig.add_trace(
                         go.Scatter(
                             x=time_points,
                             y=quality_points,
                             mode='lines+markers',
-                            name=f'{batch.produce_type}',
-                            legendgroup=f'{batch.produce_type}',
-                            showlegend=(f'{batch.produce_type}' not in [t.name for t in fig.data]),
-                            line=dict(color=colors[batch_id % len(colors)], width=3),
+                            name=f'{p_type}',
+                            legendgroup=f'{p_type}',
+                            showlegend=show_in_legend,
+                            line=dict(color=produce_color_map[p_type], width=3),
                             marker=dict(size=8),
                             hovertemplate='Time: %{x:.0f} min<br>Quality: %{y:.1%}<extra></extra>'
                         ),
